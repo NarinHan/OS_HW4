@@ -10,12 +10,14 @@
 #include <ctype.h>
 #include <signal.h>
 
-typedef struct parsing {
+typedef struct _data {
     int tnum ;
     int size ;
     char output_path[30] ;
     char dir[30] ;
 } data ;
+
+data d ;
 
 // User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
 // - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
@@ -23,9 +25,8 @@ typedef struct parsing {
 //     - -t=NUM : creates upto NUM threads addition to the main thread; no more than 64
 //     - -m=NUM : ignores all files whose size is less than NUM bytes from the search; default 1024
 //     - -o FILE : produces to the output to FILE; by default the output must be printed to the stdout
-// - For invalid inputs : show proper error messages to the use and terminates
-data option_parsing(int argc, char **argv) {
-    data d ;
+// - For invalid inputs : show proper error messages to the user and terminates
+void option_parsing(int argc, char **argv) {
     int opt; // option
     char temp_input[30];
 
@@ -39,7 +40,7 @@ data option_parsing(int argc, char **argv) {
                 // tnum = atoi(temp_input + 1) ;
                 char *endptr ;
                 d.tnum = strtol(temp_input, &endptr, 10) ; // attempt to convert the entire string to an integer
-                                                         // set the first invalid character encountered during the conversion in &endptr
+                                                           // set the first invalid character encountered during the conversion in &endptr
                 while (*endptr && !isdigit(*endptr)) { // skip any non-digit characters
                     endptr++ ;
                 }
@@ -52,7 +53,7 @@ data option_parsing(int argc, char **argv) {
                 // sscanf(temp_input, "=%d", &tnum) ;    
                 // tnum = atoi(temp_input + 1) ;
                 d.size = strtol(temp_input, &endptr, 10) ; // attempt to convert the entire string to an integer
-                                                         // set the first invalid character encountered during the conversion in &endptr
+                                                           // set the first invalid character encountered during the conversion in &endptr
                 while (*endptr && !isdigit(*endptr)) { // skip any non-digit characters
                     endptr++ ;
                 }
@@ -61,10 +62,18 @@ data option_parsing(int argc, char **argv) {
                 }
                 break ;
             case 'o' : // TODO : 생략 가능 > default stdout
-                memcpy(d.output_path, optarg, strlen(optarg)) ;
-                d.output_path[strlen(optarg)] = '\0' ;
+                memcpy(temp_input, optarg, strlen(optarg)) ;
+                int idx = 0 ;
+                for (int i = 0 ; i < strlen(temp_input) ; i++) {
+                    if (isalpha(temp_input[i])) {
+                        d.output_path[idx] = temp_input[i] ;
+                        idx++ ;
+                    }
+                }
+                d.output_path[strlen(d.output_path)] = '\0' ;
                 break ;
             case ':' :
+                // TODO : invalid input 일 때 handling, this one is not currently not working
                 if (optopt == 't' || optopt == 'm') {
                     printf("err : -%c option requires int\n", optopt) ;
                 }
@@ -78,8 +87,25 @@ data option_parsing(int argc, char **argv) {
         }
     }
     memcpy(d.dir, argv[optind], strlen(argv[optind])) ;
+}
 
-    return d ;
+// Display 
+void display() 
+{
+    // - Prints the list of the filepath lists such that each filepath list enumerates 
+    //     all relative paths of the files having the exact same content, discovered so far
+    //     - Each list guarded by square brackets []
+    //     - Each element of a list must be separated by comma and newline
+    // - Print the search progress to standard output every 5 sec
+    //     - Show number of files known to have at least one other identical file
+    //     - Other information about the program execution
+    //         - TODO : should be specified > t/m/o option, target directory ?
+    printf("(t) Number of thread : %d\n", d.tnum) ;
+    printf("(m) Ignoring file size : %d\n", d.size) ;
+    printf("(o) Output path : %s\n", d.output_path) ;
+    printf("Target directory : %s\n", d.dir) ;
+    printf("// TODO : Print the list of the filepath in []\n") ;
+    printf("// TODO : Print the number of files known to have at least one other identical file\n") ;
 }
 
 // Signal : Print the search progress to standard output every 5 sec
@@ -89,7 +115,7 @@ void sigalrm_handler(int sig)
     {
         printf("\nsigalrm_handler function is handling 5 sec rule\n") ;
         // TODO : don't forget to add alarm(5) and alarm(0) somewhere in the main ...
-        // display
+        display() ;
     }
 }
 
@@ -99,10 +125,12 @@ void sigint_handler(int sig)
     if (sig == SIGINT) {
         printf("\nsigint_handler function is handling CTRL+C\n") ;
         // produce output
-        // display
+        display() ;
     }
     exit(0) ;
 }
+
+
 
 int 
 main(int argc, char* argv[])
@@ -113,28 +141,11 @@ main(int argc, char* argv[])
     // alarm(5) ;  
 
     printf("...going to sleep...\n") ;
-    sleep(10) ;
+    sleep(3) ;
     printf("...now wake up...\n") ;
     
-    data d = option_parsing(argc, *&argv) ;
-
-    printf("t : %d\n", d.tnum) ;
-    printf("m : %d\n", d.size) ;
-    printf("o : %s\n", d.output_path) ;
-    printf("dir : %s\n", d.dir) ;
-
-    // Signal & Termination & Display
-    // - Prints the list of the filepath lists such that each filepath list enumerates all relative paths of the files having the exact same content, discovered so fread
-    //     - Each list guarded by square brackets []
-    //     - Each element of a list must be separated by comma and newline
-    // - Print the search progress to standard output every 5 sec
-    //     - Show number of files known to have at least one other identical file
-    //     - Other information about the program execution
-    //         - TODO : should be specified > t/m/o option, target directory ?
-
-    
-
-
+    option_parsing(argc, *&argv) ;
+    display() ;
 
     return 0;
 }
