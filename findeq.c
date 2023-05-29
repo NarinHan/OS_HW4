@@ -9,11 +9,12 @@
 #include <pthread.h>
 #include <ctype.h>
 #include <signal.h>
+#include <dirent.h> 
 
 typedef struct parsing {
     int tnum ;
     int size ;
-    char output_path[30] ;
+    char output_path[30];
     char dir[30] ;
 } data ;
 
@@ -26,14 +27,25 @@ typedef struct parsing {
 // - For invalid inputs : show proper error messages to the use and terminates
 data option_parsing(int argc, char **argv) {
     data d ;
+    d.size = 0;
+    d.tnum = 0;
+    memset(d.dir, 0, sizeof(char)*30);
+    memset(d.output_path, 0, sizeof(char)*30);
+
     int opt; // option
     char temp_input[30];
-
+    printf("argc: %d, argv len: %lu\n",argc, strlen(argv[1]));
+    
+    int i = 1;
     while ( (opt = getopt(argc, argv, ":t:m:o:")) != -1 ) 
     {
+        printf("optind in while loop: %d\n", optind);
+        printf("%d\n",i);
+        i++;
         switch (opt)
         {
             case 't' :
+                printf("this is t\n");
                 memcpy(temp_input, optarg, strlen(optarg)) ;
                 // sscanf(temp_input, "=%d", &tnum) ;    
                 // tnum = atoi(temp_input + 1) ;
@@ -48,6 +60,7 @@ data option_parsing(int argc, char **argv) {
                 } 
                 break ;
             case 'm' :
+                printf("this is m\n");
                 memcpy(temp_input, optarg, strlen(optarg)) ;
                 // sscanf(temp_input, "=%d", &tnum) ;    
                 // tnum = atoi(temp_input + 1) ;
@@ -61,6 +74,7 @@ data option_parsing(int argc, char **argv) {
                 }
                 break ;
             case 'o' : // TODO : 생략 가능 > default stdout
+                printf("this is o\n");
                 memcpy(d.output_path, optarg, strlen(optarg)) ;
                 d.output_path[strlen(optarg)] = '\0' ;
                 break ;
@@ -77,6 +91,8 @@ data option_parsing(int argc, char **argv) {
                 exit(1) ;
         }
     }
+    printf("hi!\n");
+    printf("optind: %d\n",optind);
     memcpy(d.dir, argv[optind], strlen(argv[optind])) ;
 
     return d ;
@@ -112,9 +128,9 @@ main(int argc, char* argv[])
 
     // alarm(5) ;  
 
-    printf("...going to sleep...\n") ;
-    sleep(10) ;
-    printf("...now wake up...\n") ;
+    // printf("...going to sleep...\n") ;
+    // sleep(10) ;
+    // printf("...now wake up...\n") ;
     
     data d = option_parsing(argc, *&argv) ;
 
@@ -132,9 +148,27 @@ main(int argc, char* argv[])
     //     - Other information about the program execution
     //         - TODO : should be specified > t/m/o option, target directory ?
 
-    
+    //need to read all the files exisiting on the target directory
+    DIR *dir_pointer;
+    struct dirent *dir;
+    dir_pointer= opendir(d.dir);
+    int count=0;
+    if (dir_pointer) {
+        while ((dir = readdir(dir_pointer)) != NULL) {
+            count++;
+            printf("%s\n", dir->d_name);
+        }
+        closedir(dir_pointer);
+    }
 
+    //using these files, we need to store two values
+    //1. each files' size in byte
+    //2. each files' sequence of byte
 
+    //size of each files can be identified by ftell()
+    //sequence of byte can be known by fgetc
+    //  -> since fgetc reads one character at a time,
+    //     we just have to compare two files parellel.
 
     return 0;
 }
