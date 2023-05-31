@@ -10,13 +10,40 @@
 #include <ctype.h>
 #include <signal.h>
 #include <dirent.h> 
+#include <sys/types.h>
+#include <sys/stat.h>
 
 typedef struct parsing {
     int tnum ;
     int size ;
     char output_path[30];
-    char dir[30] ;
+    char dir[30];
 } data ;
+
+// global variables
+
+//for counting total file numbers
+int tot_file_num = 0;
+//for result path
+char *result_dir[256];
+
+typedef struct _file_node {
+    int file_size;
+    char file_path[256];
+} file_node;
+
+typedef struct _dir_node {
+    char        dir_path[256];
+} dir_node;
+
+typedef struct _tree{
+    file_node       **file;
+    dir_node        **dir;
+    struct _tree    *grow;
+} tree;
+
+pthread_mutex_t lock;
+int max_threads = 64;
 
 // User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
 // - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
@@ -91,7 +118,6 @@ data option_parsing(int argc, char **argv) {
                 exit(1) ;
         }
     }
-    printf("hi!\n");
     printf("optind: %d\n",optind);
     memcpy(d.dir, argv[optind], strlen(argv[optind])) ;
 
@@ -120,9 +146,80 @@ void sigint_handler(int sig)
     exit(0) ;
 }
 
+long get_file_size(char *filename) {
+    FILE *fp = fopen(filename, "rb");
+
+    if (fp==NULL)
+        return -1;
+
+    if (fseek(fp, 0, SEEK_END) < 0) {
+        fclose(fp);
+        return -1;
+    }
+
+    //size of each files can be identified by ftell()
+    long size = ftell(fp);
+    // release the resources when not required
+    fclose(fp);
+    return size;
+}
+
+//reading files recursively
+void read_file(char* path){
+    //variables to determine the file status
+    struct stat file_info;
+    mode_t file_mode;
+
+    //actual file reading process
+    DIR *dir_pointer;
+    struct dirent *dir;
+    dir_pointer = opendir(path);
+    if(dir_pointer == NULL) return;
+
+    while ((dir = readdir(dir_pointer)) != NULL) {
+        char tot_dir[2048];
+        memset(tot_dir, '\0', sizeof(char)*2048);
+
+        strcat(tot_dir, path);
+        strcat(tot_dir,"/");
+        strcat(tot_dir, dir->d_name);
+
+        //printf("total path: %s\n",tot_dir);
+        if ((lstat(tot_dir, &file_info)) == -1){
+            //printf("end of directory\n");
+        }
+        file_mode = file_info.st_mode;
+
+        //printf("d_name: %s\n",dir->d_name);
+        if(strncmp(dir->d_name,".",1)==0 || strcmp(dir->d_name,"..")==0){
+            continue;
+        }
+
+        if (S_ISLNK(file_mode)){
+            continue;
+        }
+        else if (S_ISDIR(file_mode)){
+            //printf("subdirectory...going to recursive mode\n");
+            read_file(tot_dir);
+        }
+        tot_file_num++;
+
+        long size;
+        size = file_info.st_size;
+
+        printf("total path: %s\n",tot_dir);
+        printf("size of this file: %ld bytes\n\n",size);
+    }
+    closedir(dir_pointer);
+}
+
+//use threads to distribute work
+//producer & consumer?
+
 int 
 main(int argc, char* argv[])
 {
+    pthread_mutex_init(&lock, NULL) ;
     signal(SIGALRM, sigalrm_handler) ;
     signal(SIGINT, sigint_handler) ;
 
@@ -134,7 +231,8 @@ main(int argc, char* argv[])
     
     data d = option_parsing(argc, *&argv) ;
 
-    printf("t : %d\n", d.tnum) ;
+    if(d.tnum < 64) max_threads = d.tnum;
+    printf("t : %d\n", max_threads) ;
     printf("m : %d\n", d.size) ;
     printf("o : %s\n", d.output_path) ;
     printf("dir : %s\n", d.dir) ;
@@ -148,24 +246,19 @@ main(int argc, char* argv[])
     //     - Other information about the program execution
     //         - TODO : should be specified > t/m/o option, target directory ?
 
+    tree root;
+    root.dir = (dir_node**) malloc (sizeof(dir_node*));
+    root.dir[0] = (dir_node*) malloc (sizeof(dir_node));
+
+    dir_node root_dir;
     //need to read all the files exisiting on the target directory
-    DIR *dir_pointer;
-    struct dirent *dir;
-    dir_pointer= opendir(d.dir);
-    int count=0;
-    if (dir_pointer) {
-        while ((dir = readdir(dir_pointer)) != NULL) {
-            count++;
-            printf("%s\n", dir->d_name);
-        }
-        closedir(dir_pointer);
-    }
+    read_file(d.dir);
+    printf("number of files: %d\n",tot_file_num);
 
     //using these files, we need to store two values
     //1. each files' size in byte
     //2. each files' sequence of byte
 
-    //size of each files can be identified by ftell()
     //sequence of byte can be known by fgetc
     //  -> since fgetc reads one character at a time,
     //     we just have to compare two files parellel.
