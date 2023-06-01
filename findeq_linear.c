@@ -1,7 +1,3 @@
-// Design and construct a multithreaded program that finds groups of equal files
-// - Count how much memory space is wasted by redundant files
-// - Identify chances of saving up storage spaces by removing redundant files
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,13 +17,13 @@ typedef struct _data {
 
 data d ;
 
-// User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
-// - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
-// - Options
-//     - -t=NUM : creates upto NUM threads addition to the main thread; no more than 64
-//     - -m=NUM : ignores all files whose size is less than NUM bytes from the search; default 1024
-//     - -o FILE : produces to the output to FILE; by default the output must be printed to the stdout
-// - For invalid inputs : show proper error messages to the use and terminates
+char *file_name[1000] ;
+int file_count = 0 ;
+
+char *identical[1000] ;
+int identical_count = 0 ;
+int iden_file_count = 0 ;
+
 void option_parsing(int argc, char **argv) {
     int opt; // option
     char temp_input[30];
@@ -94,14 +90,6 @@ void option_parsing(int argc, char **argv) {
 // Display 
 void display() 
 {
-    // Prints the list of the filepath lists such that each filepath list enumerates 
-    //     all relative paths of the files having the exact same content, discovered so far
-    //     - Each list guarded by square brackets []
-    //     - Each element of a list must be separated by comma and newline
-    // Print the search progress to standard output every 5 sec
-    //     - Show number of files known to have at least one other identical file
-    //     - Other information about the program execution
-    //         - TODO : should be specified > t/m/o option, target directory ?
     printf("(t) Number of thread : %d\n", d.tnum) ;
     printf("(m) Ignoring file size : %d\n", d.size) ;
     printf("(o) Output path : %s\n", d.output_path) ;
@@ -133,11 +121,8 @@ void sigint_handler(int sig)
 }
 
 // Checks all regular files in the target directory and its subdirectory recursively
-void readDirectory(const char* dir_name, char **file_name, int *file_count)  
+void readDirectory(const char* dir_name)  
 {
-    // Do not follow hard and soft links
-    // Do not consider non-regular files
-
     DIR *dir = opendir(dir_name) ;
     if (dir == NULL) {
         printf("Failed to open a directory!\n") ;
@@ -162,15 +147,15 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
                 continue ;
             }
             // allocate memory to store the directory + file name
-            file_name[*file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
-            strcpy(file_name[*file_count], file_path) ;
-            (*file_count)++ ;
+            file_name[file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
+            strcpy(file_name[file_count], file_path) ;
+            file_count++ ;
         } 
         else if (S_ISDIR(file_stat.st_mode)) { // subdirectory 
             if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) { // to avoid infinite recursion
                 char subdir[256] ;
                 snprintf(subdir, sizeof(subdir), "%s/%s", dir_name, entry->d_name) ;
-                readDirectory(subdir, file_name, file_count) ;
+                readDirectory(subdir) ;
             }
         }
         // else if (S_ISLINK(file_stat.st_mode)) {
@@ -181,19 +166,19 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
     closedir(dir) ;
 }
 
-void compare(char **file_name, int file_count, char **identical, int *identical_count, int index) 
+void compare(int index) 
 {
     // initialize
     if (identical[0] != NULL) {
-        for (int i = 0 ; i < *identical_count ; i++) {
+        for (int i = 0 ; i < identical_count ; i++) {
             free(identical[i]) ;
         }
-        *identical_count = 0 ;
+        identical_count = 0 ;
     }
 
-    identical[*identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
-    strcpy(identical[*identical_count], file_name[index]) ;
-    (*identical_count)++ ;
+    identical[identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+    strcpy(identical[identical_count], file_name[index]) ;
+    identical_count++ ;
 
     // file open
     FILE *fp1, *fp2 ;
@@ -251,10 +236,14 @@ void compare(char **file_name, int file_count, char **identical, int *identical_
         }
 
         if (flag == 0) { // identical
-            identical[*identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
-            strcpy(identical[*identical_count], file_name[i]) ;
-            (*identical_count)++ ;
+            identical[identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
+            strcpy(identical[identical_count], file_name[i]) ;
+            identical_count++ ;
         }
+    }
+
+    if (identical_count != 1) {
+        iden_file_count++ ;
     }
     
     fclose(fp1) ;
@@ -276,21 +265,16 @@ main(int argc, char* argv[])
     option_parsing(argc, *&argv) ;
     display() ;
 
-    char *file_name[1000] ;
-    int file_count = 0 ;
-    readDirectory(d.dir, file_name, &file_count) ;
+    readDirectory(d.dir) ;
 
     for (int i = 0 ; i < file_count ; i++) {
         printf("%s\n", file_name[i]) ;
     }
 
-    char *identical[1000] ;
-    int identical_count = 0 ;
-
     for (int i = 0 ; i < file_count ; i++) {
-        compare(file_name, file_count, identical, &identical_count, i) ;
+        compare(i) ;
 
-        printf("\nNumber of identical files : %d\n", identical_count) ;
+        printf("\nNumber of identical files : %d\n", iden_file_count) ;
         printf("[\n") ;
         for (int j = 0 ; j < identical_count ; j++) {
             printf("    %s\n", identical[j]) ;

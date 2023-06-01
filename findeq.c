@@ -1,7 +1,3 @@
-// Design and construct a multithreaded program that finds groups of equal files
-// - Count how much memory space is wasted by redundant files
-// - Identify chances of saving up storage spaces by removing redundant files
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,21 +18,58 @@ typedef struct _data {
 
 data d ;
 
+typedef struct _subtask {
+    int index ;
+    int used ;
+} subtask ;
+
+char *file_name[1000] ;
+int file_count = 0 ;
+
+char *identical[1000] ;
+int identical_count = 0 ;
+int iden_file_count = 0 ;
+
 pthread_mutex_t lock ;
 pthread_mutex_t lock_n_threads ;
 
 int *threads ;
 
+int n_threads = 0 ;
+int max_threads = 64 ;
+
+pthread_mutex_t subtasks_lock ;
+subtask * subtasks[8] ;
+int head = 0 ;
+int tail = 0 ;
+int done = 0 ;
+
 sem_t unused ;
 sem_t inused ;
 
-// User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
-// - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
-// - Options
-//     - -t=NUM : creates upto NUM threads addition to the main thread; no more than 64
-//     - -m=NUM : ignores all files whose size is less than NUM bytes from the search; default 1024
-//     - -o FILE : produces to the output to FILE; by default the output must be printed to the stdout
-// - For invalid inputs : show proper error messages to the use and terminates
+void put_subtask (subtask * s) 
+{
+	sem_wait(&unused) ;
+	pthread_mutex_lock(&subtasks_lock) ;
+		subtasks[tail] = s ;
+		tail = (tail + 1) % 8 ;
+	pthread_mutex_unlock(&subtasks_lock) ;
+	sem_post(&inused) ;
+}
+
+subtask * get_subtask () 
+{
+	subtask * s ;
+	sem_wait(&inused) ;
+	pthread_mutex_lock(&subtasks_lock) ;
+		s = subtasks[head] ;
+		head = (head + 1) % 8 ;
+	pthread_mutex_unlock(&subtasks_lock) ;
+	sem_post(&unused) ;
+
+	return s ;
+}
+
 void option_parsing(int argc, char **argv) {
     int opt; // option
     char temp_input[30];
@@ -103,14 +136,6 @@ void option_parsing(int argc, char **argv) {
 // Display 
 void display() 
 {
-    // Prints the list of the filepath lists such that each filepath list enumerates 
-    //     all relative paths of the files having the exact same content, discovered so far
-    //     - Each list guarded by square brackets []
-    //     - Each element of a list must be separated by comma and newline
-    // Print the search progress to standard output every 5 sec
-    //     - Show number of files known to have at least one other identical file
-    //     - Other information about the program execution
-    //         - TODO : should be specified > t/m/o option, target directory ?
     printf("(t) Number of thread : %d\n", d.tnum) ;
     printf("(m) Ignoring file size : %d\n", d.size) ;
     printf("(o) Output path : %s\n", d.output_path) ;
@@ -142,11 +167,8 @@ void sigint_handler(int sig)
 }
 
 // Checks all regular files in the target directory and its subdirectory recursively
-void readDirectory(const char* dir_name, char **file_name, int *file_count)  
+void readDirectory(const char* dir_name)  
 {
-    // Do not follow hard and soft links
-    // Do not consider non-regular files
-
     DIR *dir = opendir(dir_name) ;
     if (dir == NULL) {
         printf("Failed to open a directory!\n") ;
@@ -171,15 +193,15 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
                 continue ;
             }
             // allocate memory to store the directory + file name
-            file_name[*file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
-            strcpy(file_name[*file_count], file_path) ;
-            (*file_count)++ ;
+            file_name[file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
+            strcpy(file_name[file_count], file_path) ;
+            file_count++ ;
         } 
         else if (S_ISDIR(file_stat.st_mode)) { // subdirectory 
             if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) { // to avoid infinite recursion
                 char subdir[256] ;
                 snprintf(subdir, sizeof(subdir), "%s/%s", dir_name, entry->d_name) ;
-                readDirectory(subdir, file_name, file_count) ;
+                readDirectory(subdir) ;
             }
         }
         // else if (S_ISLINK(file_stat.st_mode)) {
@@ -190,19 +212,19 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
     closedir(dir) ;
 }
 
-void * compare(char **file_name, int file_count, char **identical, int *identical_count, int index) 
+void _compare(int index) 
 {
     // initialize
     if (identical[0] != NULL) {
-        for (int i = 0 ; i < *identical_count ; i++) {
+        for (int i = 0 ; i < identical_count ; i++) {
             free(identical[i]) ;
         }
-        *identical_count = 0 ;
+        identical_count = 0 ;
     }
 
-    identical[*identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
-    strcpy(identical[*identical_count], file_name[index]) ;
-    (*identical_count)++ ;
+    identical[identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+    strcpy(identical[identical_count], file_name[index]) ;
+    identical_count++ ;
 
     // file open
     FILE *fp1, *fp2 ;
@@ -260,14 +282,64 @@ void * compare(char **file_name, int file_count, char **identical, int *identica
         }
 
         if (flag == 0) { // identical
-            identical[*identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
-            strcpy(identical[*identical_count], file_name[i]) ;
-            (*identical_count)++ ;
+            identical[identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
+            strcpy(identical[identical_count], file_name[i]) ;
+            identical_count++ ;
         }
+    }
+
+    if (identical_count != 1) {
+        iden_file_count++ ;
     }
     
     fclose(fp1) ;
     fclose(fp2) ;
+}
+
+void * compare (void * arg) {
+
+	subtask * s = (subtask *) arg ;
+
+	int index ;
+    int used ;
+
+    // subtask 구조체로 받은 값들을 compare 함수 만의 local variable 로 만들어주기
+	index = s->index ;
+    used = s->used ;
+	free(arg) ;
+
+    _compare(index) ;
+
+	pthread_mutex_lock(&lock_n_threads) ;
+	    n_threads-- ;
+
+	    pthread_t t = pthread_self() ;
+
+        for (int i = 0 ; i < max_threads ; i++) {
+            if (threads[i] == t) 
+                threads[i] = 0 ;
+        }
+	pthread_mutex_unlock(&lock_n_threads) ;
+
+	return NULL ;
+}
+
+void * worker (void * arg)
+{
+	subtask * s ;
+
+	while ((s = get_subtask())) { // subtask 구조체 받아서 compare 에 넘겨줌
+		compare(s) ;
+	}
+	return NULL ;
+}
+
+void producer (int index)
+{
+    subtask * s = (subtask *) malloc(sizeof(subtask)) ;
+    s->index = index ;
+
+    put_subtask(s) ;
 }
 
 int 
@@ -285,39 +357,49 @@ main(int argc, char* argv[])
     option_parsing(argc, *&argv) ;
     display() ;
 
-    pthread_t threads[d.tnum] ;
+    if (d.tnum <= max_threads) {
+        max_threads = d.tnum ;
+    }
+
+    pthread_t threads[max_threads] ;
 
     pthread_mutex_init(&lock, NULL) ;
     pthread_mutex_init(&lock_n_threads, NULL) ;
+	pthread_mutex_init(&subtasks_lock, NULL) ;
 
     sem_init(&inused, 0, 0) ;
     sem_init(&unused, 0, 8) ;
 
-    char *file_name[1000] ;
-    int file_count = 0 ;
-    readDirectory(d.dir, file_name, &file_count) ;
+    readDirectory(d.dir) ;
 
     for (int i = 0 ; i < file_count ; i++) {
         printf("%s\n", file_name[i]) ;
     }
 
     for (int i = 0 ; i < d.tnum ; i++) {
-        pthread_create(&(threads[i]), NULL, compare, NULL) ;
+        pthread_create(&(threads[i]), NULL, worker, NULL) ;
     }
 
-    char *identical[1000] ;
-    int identical_count = 0 ;
-
     for (int i = 0 ; i < file_count ; i++) {
-        compare(file_name, file_count, identical, &identical_count, i) ;
+        producer(i) ;
 
-        printf("\nNumber of identical files : %d\n", identical_count) ;
+        printf("\nNumber of identical files : %d\n", iden_file_count) ;
         printf("[\n") ;
         for (int j = 0 ; j < identical_count ; j++) {
             printf("    %s\n", identical[j]) ;
         }
         printf("]\n") ;
     }
+
+    for (int i = 0 ; i < max_threads ; i++) 
+		put_subtask(NULL) ;
+
+    int i ;
+	pthread_mutex_lock(&lock_n_threads) ;
+		// for(i = 0 ; i < max_threads ; i++) {
+			pthread_join(threads[i], NULL) ;
+		// s}
+	pthread_mutex_unlock(&lock_n_threads) ;
 
     // deallocation
     for (int i = 0 ; i < file_count ; i++) {
@@ -326,5 +408,6 @@ main(int argc, char* argv[])
     for (int i = 0 ; i < identical_count ; i++) {
         free(identical[i]) ;
     }
+
     return 0;
 }
