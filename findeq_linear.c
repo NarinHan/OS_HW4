@@ -158,12 +158,12 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
         }
 
         if (S_ISREG(file_stat.st_mode)) { // regular file
+            if (strncmp(entry->d_name, ".", 1) == 0) { // to avoid .DS_Store, .gitignore, etc
+                continue ;
+            }
             // allocate memory to store the directory + file name
-            size_t len = strlen(dir_name) + 1 + entry->d_reclen + 1 ;
-            file_name[*file_count] = (char *) malloc(len * sizeof(char)) ;
-            strcpy(file_name[*file_count], dir_name) ;
-            strcat(file_name[*file_count], "/") ;
-            strcat(file_name[*file_count], entry->d_name) ;
+            file_name[*file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
+            strcpy(file_name[*file_count], file_path) ;
             (*file_count)++ ;
         } 
         else if (S_ISDIR(file_stat.st_mode)) { // subdirectory 
@@ -173,39 +173,26 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
                 readDirectory(subdir, file_name, file_count) ;
             }
         }
+        // else if (S_ISLINK(file_stat.st_mode)) {
+        //     continue ;
+        // }
     }
 
     closedir(dir) ;
-
-/* 
-    // need to read all the files exisiting on the target directory
-    DIR *dir_pointer;
-    struct dirent *dir;
-    dir_pointer = opendir(d.dir);
-    int count = 0;
-    if (dir_pointer) {
-        while ((dir = readdir(dir_pointer)) != NULL) {
-            count++;
-            printf("%s\n", dir->d_name);
-        }
-        closedir(dir_pointer);
-    }
-
-    //using these files, we need to store two values
-    //1. each files' size in byte
-    //2. each files' sequence of byte
-
-    //size of each files can be identified by ftell()
-    //sequence of byte can be known by fgetc
-    //  -> since fgetc reads one character at a time,
-    //     we just have to compare two files parellel.
-*/
 }
 
-void compare(char **file_name, int file_count, char **identical, int *identical_count) 
+void compare(char **file_name, int file_count, char **identical, int *identical_count, int index) 
 {
-    identical[*identical_count] = (char *) malloc((strlen(file_name[0]) + 1) * sizeof(char)) ;
-    strcpy(identical[*identical_count], file_name[0]) ;
+    // initialize
+    if (identical[0] != NULL) {
+        for (int i = 0 ; i < *identical_count ; i++) {
+            free(identical[i]) ;
+        }
+        *identical_count = 0 ;
+    }
+
+    identical[*identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+    strcpy(identical[*identical_count], file_name[index]) ;
     (*identical_count)++ ;
 
     // file open
@@ -213,9 +200,9 @@ void compare(char **file_name, int file_count, char **identical, int *identical_
     long fp1s, fp2s ;
     long fp1b, fp2b ;
 
-    fp1 = fopen(file_name[0], "rb") ; // open pivot file
+    fp1 = fopen(file_name[index], "rb") ; // open pivot file
     if (fp1 == NULL) {
-        printf("Failed to open a file %s!\n", file_name[0]) ;
+        printf("Failed to open a file %s!\n", file_name[index]) ;
         return ;
     }
 
@@ -224,7 +211,12 @@ void compare(char **file_name, int file_count, char **identical, int *identical_
     fp1s = ftell(fp1) ; // get the current position of the file pointer == file size
     rewind(fp1) ; // rewind to get the sequence of bytes
 
-    for (int i = 1 ; i < file_count ; i++) {
+    for (int i = 0 ; i < file_count ; i++) {
+        if (i == index)
+            continue ;
+        
+        rewind(fp1) ;
+
         fp2 = fopen(file_name[i], "rb") ; // open in binary mode
         if (fp2 == NULL) {
             printf("Failed to open a file %s!\n", file_name[i]) ;
@@ -236,9 +228,8 @@ void compare(char **file_name, int file_count, char **identical, int *identical_
         fp2s = ftell(fp2) ; // get the current position of the file pointer == file size
         rewind(fp2) ; // rewind to get the sequence of bytes
         
-        printf("        TEST : currently opening %s\n", file_name[i]) ;
-
         int flag = 0 ;
+        
         // compare the sizes
         if (fp1s == fp2s) {
             // get the sequence of bytes and compare
@@ -259,7 +250,7 @@ void compare(char **file_name, int file_count, char **identical, int *identical_
             flag = 1 ;
         }
 
-        if (flag == 0) {
+        if (flag == 0) { // identical
             identical[*identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
             strcpy(identical[*identical_count], file_name[i]) ;
             (*identical_count)++ ;
@@ -296,14 +287,16 @@ main(int argc, char* argv[])
     char *identical[1000] ;
     int identical_count = 0 ;
 
-    compare(file_name, file_count, identical, &identical_count) ;
-    
-    printf("\nNumber of identical files : %d\n", identical_count) ;
-    printf("[\n") ;
-    for (int i = 0 ; i < identical_count ; i++) {
-        printf("    %s\n", identical[i]) ;
+    for (int i = 0 ; i < file_count ; i++) {
+        compare(file_name, file_count, identical, &identical_count, i) ;
+
+        printf("\nNumber of identical files : %d\n", identical_count) ;
+        printf("[\n") ;
+        for (int j = 0 ; j < identical_count ; j++) {
+            printf("    %s\n", identical[j]) ;
+        }
+        printf("]\n") ;
     }
-    printf("]\n") ;
 
     // deallocation
     for (int i = 0 ; i < file_count ; i++) {

@@ -7,17 +7,28 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <ctype.h>
 #include <signal.h>
+#include <dirent.h> 
+#include <sys/stat.h>
 
 typedef struct _data {
     int tnum ;
     int size ;
-    char output_path[30] ;
+    char output_path[30];
     char dir[30] ;
 } data ;
 
 data d ;
+
+pthread_mutex_t lock ;
+pthread_mutex_t lock_n_threads ;
+
+int *threads ;
+
+sem_t unused ;
+sem_t inused ;
 
 // User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
 // - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
@@ -25,7 +36,7 @@ data d ;
 //     - -t=NUM : creates upto NUM threads addition to the main thread; no more than 64
 //     - -m=NUM : ignores all files whose size is less than NUM bytes from the search; default 1024
 //     - -o FILE : produces to the output to FILE; by default the output must be printed to the stdout
-// - For invalid inputs : show proper error messages to the user and terminates
+// - For invalid inputs : show proper error messages to the use and terminates
 void option_parsing(int argc, char **argv) {
     int opt; // option
     char temp_input[30];
@@ -92,11 +103,11 @@ void option_parsing(int argc, char **argv) {
 // Display 
 void display() 
 {
-    // - Prints the list of the filepath lists such that each filepath list enumerates 
+    // Prints the list of the filepath lists such that each filepath list enumerates 
     //     all relative paths of the files having the exact same content, discovered so far
     //     - Each list guarded by square brackets []
     //     - Each element of a list must be separated by comma and newline
-    // - Print the search progress to standard output every 5 sec
+    // Print the search progress to standard output every 5 sec
     //     - Show number of files known to have at least one other identical file
     //     - Other information about the program execution
     //         - TODO : should be specified > t/m/o option, target directory ?
@@ -124,13 +135,140 @@ void sigint_handler(int sig)
 {
     if (sig == SIGINT) {
         printf("\nsigint_handler function is handling CTRL+C\n") ;
-        // produce output
+        // TODO : produce output
         display() ;
     }
     exit(0) ;
 }
 
+// Checks all regular files in the target directory and its subdirectory recursively
+void readDirectory(const char* dir_name, char **file_name, int *file_count)  
+{
+    // Do not follow hard and soft links
+    // Do not consider non-regular files
 
+    DIR *dir = opendir(dir_name) ;
+    if (dir == NULL) {
+        printf("Failed to open a directory!\n") ;
+        return ;
+    }
+
+    // read directory entries
+    struct dirent *entry ;
+    struct stat file_stat ;
+    while ((entry = readdir(dir)) != NULL) 
+    {
+        char file_path[256] ;
+        snprintf(file_path, sizeof(file_path), "%s/%s", dir_name, entry->d_name) ; // write formatted data to a string buffer
+
+        if (lstat(file_path, &file_stat) == -1) {
+            printf("Failed to get a file status!\n") ;
+            continue ;
+        }
+
+        if (S_ISREG(file_stat.st_mode)) { // regular file
+            if (strncmp(entry->d_name, ".", 1) == 0) { // to avoid .DS_Store, .gitignore, etc
+                continue ;
+            }
+            // allocate memory to store the directory + file name
+            file_name[*file_count] = (char *) malloc((strlen(file_path) + 1) * sizeof(char)) ;
+            strcpy(file_name[*file_count], file_path) ;
+            (*file_count)++ ;
+        } 
+        else if (S_ISDIR(file_stat.st_mode)) { // subdirectory 
+            if (strcmp(entry->d_name, ".") != 0 && strcmp(entry->d_name, "..") != 0) { // to avoid infinite recursion
+                char subdir[256] ;
+                snprintf(subdir, sizeof(subdir), "%s/%s", dir_name, entry->d_name) ;
+                readDirectory(subdir, file_name, file_count) ;
+            }
+        }
+        // else if (S_ISLINK(file_stat.st_mode)) {
+        //     continue ;
+        // }
+    }
+
+    closedir(dir) ;
+}
+
+void * compare(char **file_name, int file_count, char **identical, int *identical_count, int index) 
+{
+    // initialize
+    if (identical[0] != NULL) {
+        for (int i = 0 ; i < *identical_count ; i++) {
+            free(identical[i]) ;
+        }
+        *identical_count = 0 ;
+    }
+
+    identical[*identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+    strcpy(identical[*identical_count], file_name[index]) ;
+    (*identical_count)++ ;
+
+    // file open
+    FILE *fp1, *fp2 ;
+    long fp1s, fp2s ;
+    long fp1b, fp2b ;
+
+    fp1 = fopen(file_name[index], "rb") ; // open pivot file
+    if (fp1 == NULL) {
+        printf("Failed to open a file %s!\n", file_name[index]) ;
+        return ;
+    }
+
+    // get the file size
+    fseek(fp1, 0L, SEEK_END) ; // move the file pointer to the end of the file
+    fp1s = ftell(fp1) ; // get the current position of the file pointer == file size
+    rewind(fp1) ; // rewind to get the sequence of bytes
+
+    for (int i = 0 ; i < file_count ; i++) {
+        if (i == index)
+            continue ;
+        
+        rewind(fp1) ;
+
+        fp2 = fopen(file_name[i], "rb") ; // open in binary mode
+        if (fp2 == NULL) {
+            printf("Failed to open a file %s!\n", file_name[i]) ;
+            return ;
+        }
+        
+        // get the file size
+        fseek(fp2, 0L, SEEK_END) ; // move the file pointer to the end of the file
+        fp2s = ftell(fp2) ; // get the current position of the file pointer == file size
+        rewind(fp2) ; // rewind to get the sequence of bytes
+        
+        int flag = 0 ;
+        
+        // compare the sizes
+        if (fp1s == fp2s) {
+            // get the sequence of bytes and compare
+            while (1) {
+                fp1b = fgetc(fp1) ;
+                fp2b = fgetc(fp2) ;
+
+                if (fp1b != fp2b) {
+                    flag = 1 ;
+                    break ;
+                }
+                
+                if (fp1b == EOF || fp2b == EOF) 
+                    break ;
+            }
+        }
+        else {
+            flag = 1 ;
+        }
+
+        if (flag == 0) { // identical
+            identical[*identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
+            strcpy(identical[*identical_count], file_name[i]) ;
+            (*identical_count)++ ;
+        }
+    }
+    
+    fclose(fp1) ;
+    fclose(fp2) ;
+}
 
 int 
 main(int argc, char* argv[])
@@ -140,12 +278,53 @@ main(int argc, char* argv[])
 
     // alarm(5) ;  
 
-    printf("...going to sleep...\n") ;
-    sleep(3) ;
-    printf("...now wake up...\n") ;
+    // printf("...going to sleep...\n") ;
+    // sleep(10) ;
+    // printf("...now wake up...\n") ;
     
     option_parsing(argc, *&argv) ;
     display() ;
 
+    pthread_t threads[d.tnum] ;
+
+    pthread_mutex_init(&lock, NULL) ;
+    pthread_mutex_init(&lock_n_threads, NULL) ;
+
+    sem_init(&inused, 0, 0) ;
+    sem_init(&unused, 0, 8) ;
+
+    char *file_name[1000] ;
+    int file_count = 0 ;
+    readDirectory(d.dir, file_name, &file_count) ;
+
+    for (int i = 0 ; i < file_count ; i++) {
+        printf("%s\n", file_name[i]) ;
+    }
+
+    for (int i = 0 ; i < d.tnum ; i++) {
+        pthread_create(&(threads[i]), NULL, compare, NULL) ;
+    }
+
+    char *identical[1000] ;
+    int identical_count = 0 ;
+
+    for (int i = 0 ; i < file_count ; i++) {
+        compare(file_name, file_count, identical, &identical_count, i) ;
+
+        printf("\nNumber of identical files : %d\n", identical_count) ;
+        printf("[\n") ;
+        for (int j = 0 ; j < identical_count ; j++) {
+            printf("    %s\n", identical[j]) ;
+        }
+        printf("]\n") ;
+    }
+
+    // deallocation
+    for (int i = 0 ; i < file_count ; i++) {
+        free(file_name[i]) ;
+    }
+    for (int i = 0 ; i < identical_count ; i++) {
+        free(identical[i]) ;
+    }
     return 0;
 }
