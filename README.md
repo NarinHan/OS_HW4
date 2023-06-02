@@ -14,7 +14,6 @@ To run code
 
 >>-o : produces to the output to FILE. By default, the output must be printed to the standard output.
 
-
->you should pass the address of target directory 
+>>you should also pass the address of target directory 
 
 
