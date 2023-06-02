@@ -1,0 +1,4 @@
+all: asdasd
+
+clean:
+      adsadasd
