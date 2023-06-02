@@ -1,4 +1,4 @@
-all: compare_thread.c
+all: findeq.c
       gcc -pthread -o output_file findeq.c
       
 
