@@ -6,7 +6,7 @@ To run code
 
 >use command 'make all'
 
->run the output exe files with options (./output_file -t=8 -m=1024 -o=hi ../dir)
+>run the output exe files with options (./findeq -t=8 -m=1024 -o=hi ../dir)
 
 >you should pass the address of target directory 
 
