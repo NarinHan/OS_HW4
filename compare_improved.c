@@ -11,6 +11,8 @@
 #include <signal.h>
 #include <dirent.h> 
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 typedef struct _data {
     int tnum ;
@@ -21,7 +23,17 @@ typedef struct _data {
 
 data d ;
 
+char **identical[1000] ;
 int iden_file_count[1000];
+char *file_name[1000] ;
+int file_count = 0 ;
+int identical_count = -1 ;
+
+int GetCurrentUsec() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return tv.tv_sec;
+}
 
 // User Interface > Takes inputs as command-line arguments : $findeq [OPTION] DIR
 // - Receives a path to a target directory DIR : all files in DIR and its subdirectories are search scope 
@@ -208,7 +220,7 @@ void readDirectory(const char* dir_name, char **file_name, int *file_count)
 */
 }
 
-void compare(char **file_name, int file_count, char ***identical, int *identical_count, int index) 
+void compare(int index) 
 {
 
     // file open
@@ -268,18 +280,21 @@ void compare(char **file_name, int file_count, char ***identical, int *identical
 
         if (flag == 0) {
             if(local_file_count == 0){
-                (*identical_count)++ ;
-                identical[*identical_count] = (char **) malloc(sizeof(char*));
-                identical[*identical_count][local_file_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
-                strcpy(identical[*identical_count][local_file_count], file_name[index]) ;
+                printf("------------------------\n");
+                printf("found identical files! \n(%s)\n###  and  ###\n(%s)\n",file_name[index],file_name[i]);
+                printf("------------------------\n\n");
+                identical_count++ ;
+                identical[identical_count] = (char **) malloc(sizeof(char*));
+                identical[identical_count][local_file_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+                strcpy(identical[identical_count][local_file_count], file_name[index]) ;
                 // printf("1 file's name: %s\n",identical[*identical_count][local_file_count]);
                 local_file_count++;
             }
             // printf("size of realloc: %d\n",local_file_count+1);
             // printf("hey %s\n",identical[0][0]);
-            identical[*identical_count] = (char**)realloc(identical[*identical_count],sizeof(char*)*(local_file_count+1));
-            identical[*identical_count][local_file_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
-            strcpy(identical[*identical_count][local_file_count], file_name[i]) ;
+            identical[identical_count] = (char**)realloc(identical[identical_count],sizeof(char*)*(local_file_count+1));
+            identical[identical_count][local_file_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
+            strcpy(identical[identical_count][local_file_count], file_name[i]) ;
             // printf("%d, %d\n",*identical_count, local_file_count);
             // printf("2 file's name: %s\n",identical[*identical_count][local_file_count]);
             // printf("%s\n%s\n",identical[0][0],identical[0][1]);
@@ -287,7 +302,7 @@ void compare(char **file_name, int file_count, char ***identical, int *identical
             local_file_count++;
             
             //printf("first one: %d\n",iden_file_count[*identical_count]);
-            iden_file_count[*identical_count] = local_file_count;
+            iden_file_count[identical_count] = local_file_count;
         }
     }
     
@@ -298,6 +313,7 @@ void compare(char **file_name, int file_count, char ***identical, int *identical
 int 
 main(int argc, char* argv[])
 {
+    int start_time = GetCurrentUsec();
     signal(SIGALRM, sigalrm_handler) ;
     signal(SIGINT, sigint_handler) ;
 
@@ -310,21 +326,16 @@ main(int argc, char* argv[])
     option_parsing(argc, *&argv) ;
     display() ;
 
-    char *file_name[1000] ;
-    int file_count = 0 ;
+    
     readDirectory(d.dir, file_name, &file_count) ;
 
     for (int i = 0 ; i < file_count ; i++) {
         printf("%s\n", file_name[i]) ;
     }
 
-    char **identical[1000] ;
-    int identical_count = -1 ;
-    // int **iden_file_count;
-
     
     for(int i=0; i<file_count; i++){
-        compare(file_name, file_count, identical, &identical_count, i) ;
+        compare(i) ;
     }
 
     //compare(file_name, file_count, identical, &identical_count, 0, iden_file_count);
@@ -333,20 +344,26 @@ main(int argc, char* argv[])
     printf("[\n") ;
     
     for (int i = 0 ; i < identical_count+1 ; i++) {
+        printf("  [\n");
         for (int j = 0; j < iden_file_count[i]; j++){
             printf("    %s\n", identical[i][j]) ;
         }
-        printf("]\n") ;
-        if(i!=identical_count) printf("[\n") ;
+        printf("  ]\n") ;
     }
+    printf("]\n");
     
+    int finish_time = GetCurrentUsec();
 
-    // deallocation
-    for (int i = 0 ; i < file_count ; i++) {
-        free(file_name[i]) ;
-    }
-    for (int i = 0 ; i < identical_count ; i++) {
-        free(identical[i]) ;
-    }
+    printf("\n---------------------------------\n");
+    printf("whole searching took %d sec\n", finish_time - start_time);
+    printf("---------------------------------\n");
+
+    // // deallocation
+    // for (int i = 0 ; i < file_count ; i++) {
+    //     free(file_name[i]) ;
+    // }
+    // for (int i = 0 ; i < identical_count ; i++) {
+    //     free(identical[i]) ;
+    // }
     return 0;
 }
