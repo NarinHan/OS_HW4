@@ -20,14 +20,18 @@ data d ;
 
 typedef struct _subtask {
     int index ;
+    char *identical[1000] ; // 나랑 identical 한 file name 저장
+    int identical_count ; // 나랑 identical 한 file 개수
     int used ;
 } subtask ;
+
+subtask st[1000] ;
 
 char *file_name[1000] ;
 int file_count = 0 ;
 
-char *identical[1000] ;
-int identical_count = 0 ;
+// char *identical[1000] ;
+// int identical_count = 0 ;
 int iden_file_count = 0 ;
 
 pthread_mutex_t lock ;
@@ -49,7 +53,12 @@ sem_t inused ;
 
 void put_subtask (subtask * s) 
 {
-    printf("...In put_subtask\n") ;
+    if (s == NULL) {
+        printf("###In put_subtask with NULL\n") ;
+    }
+    else {
+        printf("###In put_subtask with s->index %d\n", s->index) ;
+    }
 	sem_wait(&unused) ;
 	pthread_mutex_lock(&subtasks_lock) ;
 		subtasks[tail] = s ;
@@ -60,7 +69,7 @@ void put_subtask (subtask * s)
 
 subtask * get_subtask () 
 {
-    printf("...In get_subtask\n") ;
+    printf("---In get_subtask()\n") ;
 	subtask * s ;
 	sem_wait(&inused) ;
 	pthread_mutex_lock(&subtasks_lock) ;
@@ -214,21 +223,25 @@ void readDirectory(const char* dir_name)
     closedir(dir) ;
 }
 
-void _compare(int index) 
+// Actual comparison 
+void _compare(int index, char **identical, int *identical_count) 
 {
+    // // initialize
+    // if (identical[0] != NULL) {
+    //     for (int i = 0 ; i < *identical_count ; i++) {
+    //         free(identical[i]) ;
+    //     }
+    //     *identical_count = 0 ;
+    // }
+
     printf("???In _compare(%d)\n", index) ;
 
-    // initialize
-    if (identical[0] != NULL) {
-        for (int i = 0 ; i < identical_count ; i++) {
-            free(identical[i]) ;
-        }
-        identical_count = 0 ;
-    }
+    // identical 배열의 첫 번째에 나를 넣어주기
+    // identical[*identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
+    // strcpy(identical[*identical_count], file_name[index]) ;
+    // (*identical_count)++ ;
 
-    identical[identical_count] = (char *) malloc((strlen(file_name[index]) + 1) * sizeof(char)) ;
-    strcpy(identical[identical_count], file_name[index]) ;
-    identical_count++ ;
+    printf("identical count in the front !!! %d\n", &identical_count);
 
     // file open
     FILE *fp1, *fp2 ;
@@ -286,37 +299,57 @@ void _compare(int index)
         }
 
         if (flag == 0) { // identical
-			pthread_mutex_lock(&lock) ; 
-                identical[identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
-                strcpy(identical[identical_count], file_name[i]) ;
-                identical_count++ ;
-            pthread_mutex_unlock(&lock) ;
+                identical[*identical_count] = (char *) malloc((strlen(file_name[i]) + 1) * sizeof(char)) ;
+                strcpy(identical[*identical_count], file_name[i]) ;
+                (*identical_count)++ ;
         }
     }
 
-    if (identical_count != 1) {
-        iden_file_count++ ;
+    // 구조체 배열에 값 넣어주기
+    st[index].index = index ;
+    for (int i = 0; i < identical_count; i++) {
+        st[index].identical[i] = (char *) malloc((strlen(identical[i]) + 1) * sizeof(char)) ;  
+        strcpy(st[index].identical[i], identical[i]) ;
     }
+    st[index].identical_count = identical_count ;
+
+    // identical 가짓수
+    if (*identical_count != 0) {
+        pthread_mutex_lock(&lock) ;
+            iden_file_count++ ;
+        pthread_mutex_unlock(&lock) ;
+    }
+
+    // printf("Index : %d ........ Inside _compare function\n", index) ;
+    // for (int j = 0 ; j < *identical_count ; j++) {
+    //     printf("    %s\n", identical[j]) ;
+    // }
     
     fclose(fp1) ;
     fclose(fp2) ;
 }
 
 void * compare (void * arg) {
+    printf("***In compare(%d)\n", index) ;
 
 	subtask * s = (subtask *) arg ;
 
 	int index ;
+    char *identical[1000] ;
+    int identical_count ;
     int used ;
 
     // subtask 구조체로 받은 값들을 compare 함수 만의 local variable 로 만들어주기
 	index = s->index ;
+    // for (int i = 0; i < 1000; i++) {
+    //     identical[i] = (char *) malloc(strlen(s->identical[i]) + 1) ;  
+    //     strcpy(identical[i], s->identical[i]) ;
+    // }
+    identical_count = s->identical_count ;
     used = s->used ;
 	free(arg) ;
 
-    printf("---In compare(%d)\n", index) ;
-
-    _compare(index) ;
+    _compare(index, identical, &identical_count) ;
 
 	pthread_mutex_lock(&lock_n_threads) ;
 	    n_threads-- ;
@@ -335,9 +368,11 @@ void * compare (void * arg) {
 void * worker (void * arg)
 {
     printf("!!!In worker()\n") ;
+
 	subtask * s ;
 
 	while ((s = get_subtask())) { // subtask 구조체 받아서 compare 에 넘겨줌
+        printf("===In while() of worker()\n") ;
 		compare(s) ;
 	}
 	return NULL ;
@@ -346,10 +381,13 @@ void * worker (void * arg)
 void producer (int index)
 {
     printf("...In producer(%d)\n", index) ;
+
     subtask * s = (subtask *) malloc(sizeof(subtask)) ;
     s->index = index ;
+    s->identical_count = 0 ;
+    s->used = 0 ; 
 
-    put_subtask(s) ;
+    put_subtask(s) ; // subtask 구조체에 값 설정
 }
 
 int 
@@ -392,15 +430,7 @@ main(int argc, char* argv[])
 
     for (int i = 0 ; i < file_count ; i++) {
         producer(i) ;
-
         printf("+++In main with file count %d\n", i) ;
-
-        // printf("\nNumber of identical files : %d\n", iden_file_count) ;
-        // printf("[\n") ;
-        // for (int j = 0 ; j < identical_count ; j++) {
-        //     printf("    %s\n", identical[j]) ;
-        // }
-        // printf("]\n") ;
     }
 
     for (int i = 0 ; i < max_threads ; i++) 
@@ -410,16 +440,26 @@ main(int argc, char* argv[])
 	pthread_mutex_lock(&lock_n_threads) ;
 		// for(i = 0 ; i < max_threads ; i++) {
 			pthread_join(threads[i], NULL) ;
-		// s}
+		// }
 	pthread_mutex_unlock(&lock_n_threads) ;
+
+    // printf("\nNumber of identical files : %d\n", iden_file_count) ;
+    // printf("[\n") ;
+    // for (int i = 0 ; i < file_count ; i++) {
+    //     printf("index : %d\n", i) ;
+    //     printf("identical count : %d\n", st[i].identical_count) ;
+    //     for (int j = 0 ; j < st[i].identical_count ; j++) {
+    //         printf("%s,\n", st[i].identical[j]) ;
+    //     }
+    // }
 
     // deallocation
     for (int i = 0 ; i < file_count ; i++) {
         free(file_name[i]) ;
     }
-    for (int i = 0 ; i < identical_count ; i++) {
-        free(identical[i]) ;
-    }
+    // for (int i = 0 ; i < identical_count ; i++) {
+    //     free(identical[i]) ;
+    // }
 
     return 0;
 }
