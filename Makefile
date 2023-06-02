@@ -1,4 +1,5 @@
-all: asdasd
+all: compare_thread.c
+      gcc -pthread -o output_file compare_thread.c
 
 clean:
-      adsadasd
+      rm -rf output_file
