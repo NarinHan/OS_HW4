@@ -351,16 +351,16 @@ void * compare (void * arg) {
 
     _compare(index, identical, &identical_count) ;
 
-	pthread_mutex_lock(&lock_n_threads) ;
-	    n_threads-- ;
+	// pthread_mutex_lock(&lock_n_threads) ;
+	//     n_threads-- ;
 
-	    pthread_t t = pthread_self() ;
+	//     pthread_t t = pthread_self() ;
 
-        for (int i = 0 ; i < max_threads ; i++) {
-            if (threads[i] == t) 
-                threads[i] = 0 ;
-        }
-	pthread_mutex_unlock(&lock_n_threads) ;
+    //     for (int i = 0 ; i < max_threads ; i++) {
+    //         if (threads[i] == t) 
+    //             threads[i] = 0 ;
+    //     }
+	// pthread_mutex_unlock(&lock_n_threads) ;
 
 	return NULL ;
 }
@@ -443,15 +443,15 @@ main(int argc, char* argv[])
 		// }
 	pthread_mutex_unlock(&lock_n_threads) ;
 
-    // printf("\nNumber of identical files : %d\n", iden_file_count) ;
-    // printf("[\n") ;
-    // for (int i = 0 ; i < file_count ; i++) {
-    //     printf("index : %d\n", i) ;
-    //     printf("identical count : %d\n", st[i].identical_count) ;
-    //     for (int j = 0 ; j < st[i].identical_count ; j++) {
-    //         printf("%s,\n", st[i].identical[j]) ;
-    //     }
-    // }
+    printf("\nNumber of identical files : %d\n", iden_file_count) ;
+    printf("[\n") ;
+    for (int i = 0 ; i < file_count ; i++) {
+        printf("    [\n") ;
+        for (int j = 0 ; j < st[i].identical_count ; j++) {
+            printf("%s,\n", st[i].identical[j]) ;
+        }
+        printf("    ]\n") ;
+    }
 
     // deallocation
     for (int i = 0 ; i < file_count ; i++) {
