@@ -296,20 +296,24 @@ void _compare(int index)
         }
 
         if (flag == 0) {
+            pthread_mutex_lock(&lock);
             if(local_file_count == 0){
                 printf("------------------------\n");
                 printf("found identical files! \n(%s)\n###  and  ###\n(%s)\n",file_name[index],file_name[i]);
                 printf("------------------------\n\n");
+                // pthread_mutex_lock(&lock);
                 identical_count++ ;
+                // pthread_mutex_unlock(&lock);
 
                 identical[identical_count] = (char **) malloc(sizeof(char*));
                 identical[identical_count][local_file_count] = (char *) malloc((strlen(file_name[index]) + 10) * sizeof(char)) ;
                 strcpy(identical[identical_count][local_file_count], file_name[index]) ;
                 // printf("1 file's name: %s\n",identical[*identical_count][local_file_count]);
-                pthread_mutex_lock(&lock);
+                // pthread_mutex_lock(&lock);
                 local_file_count++;
-                pthread_mutex_unlock(&lock);
+                // pthread_mutex_unlock(&lock);
             }
+            pthread_mutex_unlock(&lock);
             // printf("size of realloc: %d\n",local_file_count+1);
             // printf("hey %s\n",identical[0][0]);
             identical[identical_count] = (char**)realloc(identical[identical_count],sizeof(char*)*(local_file_count+1));
