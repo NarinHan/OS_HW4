@@ -26,7 +26,8 @@ char **identical[1000] ;
 int identical_count = -1;
 int iden_file_count[1000];
 
-pthread_mutex_t lock ;
+pthread_mutex_t iden_cnt_lock ;
+pthread_mutex_t file_cnt_lock ;
 pthread_mutex_t lock_n_threads ;
 pthread_mutex_t subtasks_lock ;
 
@@ -43,10 +44,29 @@ typedef struct _subtask {
     int used;
 } subtask ;
 
-subtask * subtasks[8] ;
+subtask * subtasks[64] ;
 
 int head = 0 ;
 int tail = 0 ;
+
+void print_to_file(){
+    printf("printing to file..\n");
+    FILE* fp = fopen(d.output_path, "w");
+
+    fprintf(fp,"\nNumber of identical files : %d\n", identical_count+1) ;
+
+    fputs("[\n",fp) ;
+    for (int i = 0 ; i < identical_count+1 ; i++) {
+        fputs("  [\n",fp);
+        for (int j = 0; j < iden_file_count[i]; j++){
+            fprintf(fp,"\t%s\n", identical[i][j]) ;
+        }
+        fputs("  ]\n",fp) ;
+    }
+    fputs("]\n",fp);
+
+    fclose(fp);
+}
 
 int GetCurrentUsec() {
   struct timeval tv;
@@ -61,7 +81,7 @@ void put_subtask (subtask * s)
 	pthread_mutex_lock(&subtasks_lock) ;
         //printf("is this segfault?\n");
 		subtasks[tail] = s ;
-		tail = (tail + 1) % 8 ;
+		tail = (tail + 1) % max_threads ;
         //printf("check\n");
 	pthread_mutex_unlock(&subtasks_lock) ;
 	sem_post(&inused) ;
@@ -75,7 +95,7 @@ subtask * get_subtask ()
     //printf("bye\n");
 	pthread_mutex_lock(&subtasks_lock) ;
 		s = subtasks[head] ;
-		head = (head + 1) % 8 ;
+		head = (head + 1) % max_threads ;
 	pthread_mutex_unlock(&subtasks_lock) ;
 	sem_post(&unused) ;
 
@@ -172,7 +192,10 @@ void sigalrm_handler(int sig)
     {
         printf("\nsigalrm_handler function is handling 5 sec rule\n") ;
         // TODO : don't forget to add alarm(5) and alarm(0) somewhere in the main ...
-        display() ;
+        //display() ;
+        printf("Current identical count: %d\n", identical_count);
+
+        alarm(5);
     }
 }
 
@@ -180,9 +203,12 @@ void sigalrm_handler(int sig)
 void sigint_handler(int sig) 
 {
     if (sig == SIGINT) {
+        pthread_mutex_lock(&iden_cnt_lock);
         printf("\nsigint_handler function is handling CTRL+C\n") ;
         // TODO : produce output
         display() ;
+        print_to_file();
+        pthread_mutex_unlock(&iden_cnt_lock);
     }
     exit(0) ;
 }
@@ -296,40 +322,36 @@ void _compare(int index)
         }
 
         if (flag == 0) {
-            pthread_mutex_lock(&lock);
+            pthread_mutex_lock(&file_cnt_lock);
             if(local_file_count == 0){
-                printf("------------------------\n");
-                printf("found identical files! \n(%s)\n###  and  ###\n(%s)\n",file_name[index],file_name[i]);
-                printf("------------------------\n\n");
-                // pthread_mutex_lock(&lock);
-                identical_count++ ;
-                // pthread_mutex_unlock(&lock);
+                // printf("------------------------\n");
+                // printf("found identical files! \n(%s)\n###  and  ###\n(%s)\n",file_name[index],file_name[i]);
+                // printf("------------------------\n\n");
+
+                pthread_mutex_lock(&iden_cnt_lock);
+                    identical_count++ ;
+                pthread_mutex_unlock(&iden_cnt_lock);
 
                 identical[identical_count] = (char **) malloc(sizeof(char*));
                 identical[identical_count][local_file_count] = (char *) malloc((strlen(file_name[index]) + 10) * sizeof(char)) ;
                 strcpy(identical[identical_count][local_file_count], file_name[index]) ;
                 // printf("1 file's name: %s\n",identical[*identical_count][local_file_count]);
-                // pthread_mutex_lock(&lock);
+                
                 local_file_count++;
-                // pthread_mutex_unlock(&lock);
             }
-            pthread_mutex_unlock(&lock);
             // printf("size of realloc: %d\n",local_file_count+1);
             // printf("hey %s\n",identical[0][0]);
             identical[identical_count] = (char**)realloc(identical[identical_count],sizeof(char*)*(local_file_count+1));
             identical[identical_count][local_file_count] = (char *) malloc((strlen(file_name[i]) + 10) * sizeof(char)) ;
             strcpy(identical[identical_count][local_file_count], file_name[i]) ;
-            // printf("%d, %d\n",*identical_count, local_file_count);
-            // printf("2 file's name: %s\n",identical[*identical_count][local_file_count]);
-            // printf("%s\n%s\n",identical[0][0],identical[0][1]);
-            // if(local_file_count==2) printf("%s\n",identical[0][2]);
-            pthread_mutex_lock(&lock);
+            
             local_file_count++;
             
             //printf("first one: %d\n",iden_file_count[*identical_count]);
             //printf("iden_file_count update\n");
             iden_file_count[identical_count] = local_file_count;
-            pthread_mutex_unlock(&lock);
+            
+            pthread_mutex_unlock(&file_cnt_lock);
         }
     }
     
@@ -391,21 +413,15 @@ int
 main(int argc, char* argv[])
 {
     int start_time = GetCurrentUsec();
-    pthread_mutex_init(&lock, NULL) ;
+    pthread_mutex_init(&iden_cnt_lock, NULL) ;
+    pthread_mutex_init(&file_cnt_lock, NULL) ;
     pthread_mutex_init(&lock_n_threads, NULL) ;
     pthread_mutex_init(&subtasks_lock, NULL) ;
-
-    sem_init(&inused, 0, 0) ;
-    sem_init(&unused, 0, 8) ;
 
     signal(SIGALRM, sigalrm_handler) ;
     signal(SIGINT, sigint_handler) ;
 
-    // alarm(5) ;  
-
-    // printf("...going to sleep...\n") ;
-    // sleep(10) ;
-    // printf("...now wake up...\n") ;
+    alarm(5) ;  
     
     option_parsing(argc, *&argv) ;
     display() ;
@@ -414,6 +430,9 @@ main(int argc, char* argv[])
         max_threads = d.tnum ; 
     }
     pthread_t threads[max_threads];
+
+    sem_init(&inused, 0, 0) ;
+    sem_init(&unused, 0, max_threads) ;
 
 
     readDirectory(d.dir) ;
@@ -435,22 +454,18 @@ main(int argc, char* argv[])
     for (int i = 0 ; i < max_threads ; i++) 
 		put_subtask(NULL) ;
 
-    int i ;
-	pthread_mutex_lock(&lock_n_threads) ;
-	    pthread_join(threads[i], NULL) ;
-	pthread_mutex_unlock(&lock_n_threads) ;
+
+    for(int i = 0; i < max_threads; i++){
+        pthread_mutex_lock(&lock_n_threads) ;
+            pthread_join(threads[i], NULL) ;
+        pthread_mutex_unlock(&lock_n_threads) ;
+    }
+
+    printf("Program finished\n");
 
     printf("\nNumber of identical files : %d\n", identical_count+1) ;
-    printf("[\n") ;
-    
-    for (int i = 0 ; i < identical_count+1 ; i++) {
-        printf("  [\n");
-        for (int j = 0; j < iden_file_count[i]; j++){
-            printf("    %s\n", identical[i][j]) ;
-        }
-        printf("  ]\n") ;
-    }
-    printf("]\n");
+
+    print_to_file();
     
     int finish_time = GetCurrentUsec();
 

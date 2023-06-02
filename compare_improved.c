@@ -29,6 +29,25 @@ char *file_name[1000] ;
 int file_count = 0 ;
 int identical_count = -1 ;
 
+void print_to_file(){
+    printf("printing to file..\n");
+    FILE* fp = fopen(d.output_path, "w");
+
+    fprintf(fp,"\nNumber of identical files : %d\n", identical_count+1) ;
+
+    fputs("[\n",fp) ;
+    for (int i = 0 ; i < identical_count+1 ; i++) {
+        fputs("  [\n",fp);
+        for (int j = 0; j < iden_file_count[i]; j++){
+            fprintf(fp,"\t%s\n", identical[i][j]) ;
+        }
+        fputs("  ]\n",fp) ;
+    }
+    fputs("]\n",fp);
+
+    fclose(fp);
+}
+
 int GetCurrentUsec() {
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -340,17 +359,7 @@ main(int argc, char* argv[])
 
     //compare(file_name, file_count, identical, &identical_count, 0, iden_file_count);
     
-    printf("\nNumber of identical files : %d\n", identical_count+1) ;
-    printf("[\n") ;
-    
-    for (int i = 0 ; i < identical_count+1 ; i++) {
-        printf("  [\n");
-        for (int j = 0; j < iden_file_count[i]; j++){
-            printf("    %s\n", identical[i][j]) ;
-        }
-        printf("  ]\n") ;
-    }
-    printf("]\n");
+    print_to_file();
     
     int finish_time = GetCurrentUsec();
 
